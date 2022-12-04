@@ -271,7 +271,7 @@ MonoBehaviour:
   densityShader: {fileID: 7200000, guid: 21af31cc210c9614c8fd242bb3de8b6e, type: 3}
   marchShader: {fileID: 7200000, guid: bd143eb8a7fc73f4891e8da02bc6cb96, type: 3}
   dPlanetSettings:
-    chunkSize: 10
+    chunkSize: 50
     chunkResolution: 10
     hardGroundLevel: 200
     groundLevelWeight: 1

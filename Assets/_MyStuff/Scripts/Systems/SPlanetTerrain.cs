@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Helpers;
@@ -22,6 +23,8 @@ namespace Terrain
         private EndSimulationEntityCommandBufferSystem _ecbSystem;
         private EntityCommandBuffer _ecb;
         public Dictionary<Entity, AsyncGPUReadbackRequest> chunkEntityDirtyTriangleArrayMap;
+        public Dictionary<CPlanet, NativeHashSet<int4>> createdIndexesPerPlanet;
+        private EntitiesGraphicsSystem _entitiesGraphicsSystem;
 
 
         protected override void OnStartRunning()
@@ -30,6 +33,8 @@ namespace Terrain
             _ecbSystem = World.GetOrCreateSystemManaged<EndSimulationEntityCommandBufferSystem>();
             _sGameManager = World.GetExistingSystemManaged<SGameManager>();
             chunkEntityDirtyTriangleArrayMap = new Dictionary<Entity, AsyncGPUReadbackRequest>();
+            _entitiesGraphicsSystem = World.GetExistingSystemManaged<EntitiesGraphicsSystem>();
+            createdIndexesPerPlanet = new Dictionary<CPlanet, NativeHashSet<int4>>();
         }
 
 
@@ -170,6 +175,21 @@ namespace Terrain
         }
         
         
+        public void TryAddNextChunk(int3 newChunkIndex, CPlanet cPlanet, int newSides, int mask)
+        {
+            if ((newSides & mask) == 0) return;
+        
+            int4 key = new int4(newChunkIndex, 1);
+            bool exists = createdIndexesPerPlanet[cPlanet].Contains(key);
+            if (exists) return;
+
+            Debug.Log(newChunkIndex);
+            CreateAndAddChunkToPlanet(newChunkIndex, cPlanet);
+            cPlanet.ownedChunkIndexesBuffer(EntityManager).Add(key);
+            createdIndexesPerPlanet[cPlanet].Add(key);
+        }
+        
+        
         private int NumberOfTrianglesInChunk(ComputeBuffer dirtyTrianglesBuffer)
         {
             ComputeBuffer countBuffer = new ComputeBuffer(1, sizeof(int), ComputeBufferType.Raw);
@@ -186,7 +206,7 @@ namespace Terrain
         }
         
 
-        public async Task<(NativeArray<int>, NativeArray<float3>)> CleanDirtyTriangleArrayAsync(NativeArray<Triangle> dirtyTrianglesArray)
+        public async Task<(NativeArray<int>, NativeArray<float3>, int)> CleanDirtyTriangleArrayAsync(NativeArray<Triangle> dirtyTrianglesArray)
         {
             // Create arrays
             var newSides = new NativeArray<int>(1, Allocator.TempJob);
@@ -215,7 +235,7 @@ namespace Terrain
             verticesMap.Dispose();
             triangles3D.Dispose();
 
-            return (indexes.AsArray(), vertices);
+            return (indexes.AsArray(), vertices, newSides[0]);
         }
 
 
@@ -223,7 +243,7 @@ namespace Terrain
         {
             // Create mesh
             Mesh mesh = new Mesh();
-        
+
             // Set mesh parameters
             mesh.SetVertexBufferParams(vertices.Length,
                 new VertexAttributeDescriptor(VertexAttribute.Position),
@@ -244,13 +264,9 @@ namespace Terrain
 
         public void AddMeshToChunk(Entity chunkEntity, Mesh meshToAdd)
         {
-            // var newChunkEntity = mdPlanetTerrain.baseChunkPrefab;
-            
-            var renderMeshArray = EntityManager.GetSharedComponentManaged<RenderMeshArray>(chunkEntity);
-            renderMeshArray.Meshes[0] = meshToAdd;
-            EntityManager.SetSharedComponentManaged(chunkEntity, renderMeshArray);
+            // Update materialMeshInfo
             MaterialMeshInfo materialMeshInfo = EntityManager.GetComponentData<MaterialMeshInfo>(chunkEntity);
-            materialMeshInfo.Mesh = 3;
+            materialMeshInfo.MeshID = _entitiesGraphicsSystem.RegisterMesh(meshToAdd);
             EntityManager.SetComponentData(chunkEntity, materialMeshInfo);
         }
 
@@ -261,7 +277,7 @@ namespace Terrain
             CPlanetChunk newCPlanetChunk = new CPlanetChunk(cPlanet, cPlanet.mainPlanetEntity, newChunkEntity, chunkIndex);
             _ecb.AddComponent(newChunkEntity, newCPlanetChunk);
             _ecb.AddComponent<TTerrainUpdateRequest>(newChunkEntity);
-            cPlanet.ownedChunksBuffer(EntityManager).Add(newChunkEntity);
+            cPlanet.ownedChunkEntitiesBuffer(EntityManager).Add(newChunkEntity);
         }
         
         
@@ -282,28 +298,28 @@ namespace Terrain
                 int3 triangle = 0;
                 for (int j = 0; j < 3; j++) 
                 {
-                    vertices.Add(dirtyTrianglesArray[i][j]);
-                    triangles.Add(vertices.Length - 1);
-                    // newSides[0] |= tris[i].side;
+                    // vertices.Add(dirtyTrianglesArray[i][j]);
+                    // triangles.Add(vertices.Length - 1);
+                    // newSides[0] |= dirtyTrianglesArray[i].side;
                 
-                    // if (verticesMap.TryGetValue(tris[i][j], out int k)) 
-                    //     triangle[j] = k;
-                    // else {
-                    //     vertices.Add(tris[i][j]);
-                    //     verticesMap.Add(tris[i][j], vertices.Length - 1);
-                    //     triangle[j] = vertices.Length - 1;
-                    //
-                    //     newSides[0] |= tris[i].side;
-                    // }
+                    if (verticesMap.TryGetValue(dirtyTrianglesArray[i][j], out int k)) 
+                        triangle[j] = k;
+                    else {
+                        vertices.Add(dirtyTrianglesArray[i][j]);
+                        verticesMap.Add(dirtyTrianglesArray[i][j], vertices.Length - 1);
+                        triangle[j] = vertices.Length - 1;
+                    
+                        newSides[0] |= dirtyTrianglesArray[i].side;
+                    }
                 }
-
-                // if (!triangles3D.Contains(triangle) && IsValid(triangle)) {
-                //     triangles3D.Add(triangle);
-                //     triangles.Add(triangle.x);
-                //     triangles.Add(triangle.y);
-                //     triangles.Add(triangle.z);
-                // }
-                // bool IsValid(int3 tri) => tri.x != tri.y && tri.x != tri.z && tri.y != tri.z;
+                
+                if (!triangles3D.Contains(triangle) && IsValid(triangle)) {
+                    triangles3D.Add(triangle);
+                    triangles.Add(triangle.x);
+                    triangles.Add(triangle.y);
+                    triangles.Add(triangle.z);
+                }
+                bool IsValid(int3 tri) => tri.x != tri.y && tri.x != tri.z && tri.y != tri.z;
             }
         }
         

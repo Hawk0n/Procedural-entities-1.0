@@ -22,6 +22,8 @@ namespace Terrain
         
 
         public DynamicBuffer<DTerrainNoiseLayer> dTerrainNoiseBuffer(EntityManager entityManager) => entityManager.GetBuffer<DTerrainNoiseLayer>(mainPlanetEntity);
-        public DynamicBuffer<EntityBuffer> ownedChunksBuffer(EntityManager entityManager) => entityManager.GetBuffer<EntityBuffer>(mainPlanetEntity);
+        public DynamicBuffer<EntityBuffer> ownedChunkEntitiesBuffer(EntityManager entityManager) => entityManager.GetBuffer<EntityBuffer>(mainPlanetEntity);
+        public DynamicBuffer<int4Buffer> ownedChunkIndexesBuffer(EntityManager entityManager) => entityManager.GetBuffer<int4Buffer>(mainPlanetEntity);
+
     }
 }
