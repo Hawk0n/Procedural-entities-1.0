@@ -1,0 +1,108 @@
+﻿#pragma kernel March
+#include "Includes/MarchTables.compute"
+
+struct Triangle
+{
+    float3 vertexC;
+    float3 vertexB;
+    float3 vertexA;
+    int side;
+};
+
+StructuredBuffer<int> is_done_buffer;
+AppendStructuredBuffer<Triangle> triangles;
+StructuredBuffer<float4> points;
+uint vertexPerAxis;
+float isoLevel;
+
+int indexFromCoord(uint x, uint y, uint z)
+{
+    return z * vertexPerAxis * vertexPerAxis + y * vertexPerAxis + x;
+}
+
+float3 interpolateVertices(float4 v1, float4 v2)
+{
+    float t = (isoLevel - v1.w) / (v2.w - v1.w);
+    return v1.xyz + t * (v2.xyz - v1.xyz);
+}
+
+float GetT(float v1, float v2)
+{
+    return (isoLevel - v1) / (v2 - v1);
+}
+
+bool EvaluateSide(uint id, uint equals, float4 cubeCorners[8], float4 ctc)
+{
+    return id == equals && abs(sign(cubeCorners[ctc.x].w) + sign(cubeCorners[ctc.y].w) + sign(cubeCorners[ctc.z].w) + sign(cubeCorners[ctc.w].w)) != 4;
+}
+
+
+[numthreads(8,8,8)]
+void March(uint3 id : SV_DispatchThreadID)
+{
+    // Stop one point before the end because voxel includes neighbouring points
+    if (id.x >= vertexPerAxis - 1 || id.y >= vertexPerAxis - 1 || id.z >= vertexPerAxis - 1)
+    {
+        return;
+    }
+
+    // 8 corners of the current cube
+    float4 cubeCorners[8] = {
+        points[indexFromCoord(id.x + 0, id.y + 0, id.z + 0)],
+        points[indexFromCoord(id.x + 0, id.y + 1, id.z + 0)],
+        points[indexFromCoord(id.x + 1, id.y + 1, id.z + 0)],
+        points[indexFromCoord(id.x + 1, id.y + 0, id.z + 0)],
+        points[indexFromCoord(id.x + 0, id.y + 0, id.z + 1)],
+        points[indexFromCoord(id.x + 0, id.y + 1, id.z + 1)],
+        points[indexFromCoord(id.x + 1, id.y + 1, id.z + 1)],
+        points[indexFromCoord(id.x + 1, id.y + 0, id.z + 1)]
+    };
+
+    // Find next chunks that needs to be created
+    int side = 0;
+    int n = vertexPerAxis - 2;
+    if (EvaluateSide(id.x, 0, cubeCorners, float4(4, 5, 6, 7))) side |= 1; // Back
+    if (EvaluateSide(id.y, 0, cubeCorners, float4(0, 1, 5, 4))) side |= 2; // Left
+    if (EvaluateSide(id.z, 0, cubeCorners, float4(0, 4, 7, 3))) side |= 4; // Bottom
+    if (EvaluateSide(id.x, n, cubeCorners, float4(0, 1, 2, 3))) side |= 8; // Front
+    if (EvaluateSide(id.y, n, cubeCorners, float4(3, 2, 6, 7))) side |= 16; // Right
+    if (EvaluateSide(id.z, n, cubeCorners, float4(1, 5, 2, 6))) side |= 32; // Top
+
+    int cubeIndex = 0;
+    if (cubeCorners[0].w < isoLevel) cubeIndex |= 1;
+    if (cubeCorners[2].w < isoLevel) cubeIndex |= 4;
+    if (cubeCorners[1].w < isoLevel) cubeIndex |= 2;
+    if (cubeCorners[3].w < isoLevel) cubeIndex |= 8;
+    if (cubeCorners[4].w < isoLevel) cubeIndex |= 16;
+    if (cubeCorners[5].w < isoLevel) cubeIndex |= 32;
+    if (cubeCorners[6].w < isoLevel) cubeIndex |= 64;
+    if (cubeCorners[7].w < isoLevel) cubeIndex |= 128;
+
+    // Create triangles for current cube configuration
+    for (int i = 0; triangulation[cubeIndex][i] != -1; i += 3)
+    {
+        // Get indices of corner points A and B for each of the three edges
+        // of the cube that need to be joined to form the triangle.
+        int a0 = cornerIndexAFromEdge[triangulation[cubeIndex][i + 0]];
+        int b0 = cornerIndexBFromEdge[triangulation[cubeIndex][i + 0]];
+        
+        int a1 = cornerIndexAFromEdge[triangulation[cubeIndex][i + 1]];
+        int b1 = cornerIndexBFromEdge[triangulation[cubeIndex][i + 1]];
+
+        int a2 = cornerIndexAFromEdge[triangulation[cubeIndex][i + 2]];
+        int b2 = cornerIndexBFromEdge[triangulation[cubeIndex][i + 2]];
+
+        // Only create vertexes of the lines from one point
+        // if(a0 != 0 && b0 != 0 || a1 != 0 && b1 != 0 || a2 != 0 && b2 != 0) return;
+        
+        Triangle tri;
+        
+        tri.vertexA = interpolateVertices(cubeCorners[a0], cubeCorners[b0]);
+        tri.vertexB = interpolateVertices(cubeCorners[a1], cubeCorners[b1]);
+        tri.vertexC = interpolateVertices(cubeCorners[a2], cubeCorners[b2]);
+
+        // vert_Tex[id]
+        tri.side = side;
+        triangles.Append(tri);
+    }
+}

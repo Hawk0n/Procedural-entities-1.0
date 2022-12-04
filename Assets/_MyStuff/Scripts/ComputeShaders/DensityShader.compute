@@ -1,0 +1,69 @@
+#pragma kernel CSMain
+#include "Includes/NoiseFunctions.cginc"
+
+struct NoiseLayer
+{
+    int isActive;
+    int noiseType;
+    int octaves;
+    float lacunarity;
+    float noiseScale;
+    float noiseMultiplier;
+    float persistence;
+};
+
+RWStructuredBuffer<NoiseLayer> noiseLayers;
+RWStructuredBuffer<float4> points;
+RWBuffer<int> empty;
+int noiseLayerCount;
+int vertexPerAxis;
+float chunkSize;
+float4 chunkPos;
+float4 planetPos;
+float hardGroundLevel;
+float groundLevelWeight;
+
+int indexFromCoord(uint3 id)
+{
+    return id.z * vertexPerAxis * vertexPerAxis + id.y * vertexPerAxis + id.x;
+}
+
+float biasFunction(float x, float bias)
+{
+    float k = pow(1 - bias, 3);
+    return (k * x) / (k * x - x + 1);
+}
+
+[numthreads(8, 8, 8)]
+void CSMain(int3 id : SV_DispatchThreadID)
+{
+    if (id.x >= vertexPerAxis || id.y >= vertexPerAxis || id.z >= vertexPerAxis)
+    {
+        return;
+    }
+    const float3 pointPos = chunkPos.xyz + (id * chunkSize) / (chunkPos.w * (vertexPerAxis - 1));
+    float density = hardGroundLevel - length(pointPos);
+
+    for (int i = 0; i < noiseLayerCount; i++)
+    {
+        if (noiseLayers[i].isActive != 1) return;
+        switch (round(noiseLayers[i].noiseType))
+        {
+        case 0:
+            density += SoftNoise(pointPos, noiseLayers[i].octaves,
+                                 noiseLayers[i].noiseMultiplier, noiseLayers[i].noiseScale,
+                                 noiseLayers[i].persistence, noiseLayers[i].lacunarity);
+            break;
+        case 1:
+            density += RidgeNoise(pointPos, noiseLayers[i].octaves,
+                                  noiseLayers[i].noiseMultiplier, noiseLayers[i].noiseScale,
+                                  noiseLayers[i].persistence, noiseLayers[i].lacunarity);
+            break;
+        default:
+            break;
+        }
+    }
+
+    points[indexFromCoord(id)] = float4(pointPos, density);
+    empty[indexFromCoord(id)] = sign(density);
+}
