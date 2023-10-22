@@ -8,22 +8,25 @@ namespace Terrain
 {
     public struct CPlanet : IComponentData
     {
-        public Entity mainPlanetEntity;
-        public DPlanetSettings dPlanetSettings;
+        public Entity MainPlanetEntity;
+        public DPlanetSettings DPlanetSettings;
         
         // public DynamicBuffer<DTerrainNoiseLayer> dTerrainNoiseBuffer;
         // public DynamicBuffer<EntityBuffer> ownedChunksBuffer;
         
         public CPlanet(Entity mainPlanetEntity, DPlanetSettings dPlanetSettings)
         {
-            this.mainPlanetEntity = mainPlanetEntity;
-            this.dPlanetSettings = dPlanetSettings;
+            MainPlanetEntity = mainPlanetEntity;
+            DPlanetSettings = dPlanetSettings;
         }
         
 
-        public DynamicBuffer<DTerrainNoiseLayer> dTerrainNoiseBuffer(EntityManager entityManager) => entityManager.GetBuffer<DTerrainNoiseLayer>(mainPlanetEntity);
-        public DynamicBuffer<EntityBuffer> ownedChunkEntitiesBuffer(EntityManager entityManager) => entityManager.GetBuffer<EntityBuffer>(mainPlanetEntity);
-        public DynamicBuffer<int4Buffer> ownedChunkIndexesBuffer(EntityManager entityManager) => entityManager.GetBuffer<int4Buffer>(mainPlanetEntity);
+        public readonly DynamicBuffer<DTerrainNoiseLayer> DTerrainNoiseBuffer(EntityManager entityManager) => 
+            entityManager.GetBuffer<DTerrainNoiseLayer>(MainPlanetEntity);
+        public readonly DynamicBuffer<EntityBuffer> OwnedChunkEntitiesBuffer(EntityManager entityManager) => 
+            entityManager.GetBuffer<EntityBuffer>(MainPlanetEntity);
+        public readonly DynamicBuffer<int4Buffer> OwnedChunkIndexesBuffer(EntityManager entityManager) => 
+            entityManager.GetBuffer<int4Buffer>(MainPlanetEntity);
 
     }
 }

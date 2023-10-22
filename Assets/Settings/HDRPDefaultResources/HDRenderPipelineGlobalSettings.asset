@@ -19,7 +19,7 @@ MonoBehaviour:
   m_RenderingPathDefaultCameraFrameSettings:
     bitDatas:
       data1: 73324160532610893
-      data2: 13763000477350330392
+      data2: 13799031439032811544
     lodBias: 1
     lodBiasMode: 0
     lodBiasQualityLevel: 0
@@ -123,7 +123,7 @@ MonoBehaviour:
     serializedHasVolumes: []
     bakingSets: []
     m_LightingScenario: Default
-  m_Version: 7
+  m_Version: 8
   m_ShaderVariantLogLevel: 0
   m_SupportRuntimeDebugDisplay: 0
   m_ExportShaderVariants: 1

@@ -5,7 +5,7 @@ using UnityEngine;
 namespace Terrain
 {
     [Serializable]
-    public partial struct DPlanetSettings : IComponentData
+    public struct DPlanetSettings : IComponentData
     {
         public float chunkSize;
         public int chunkResolution;

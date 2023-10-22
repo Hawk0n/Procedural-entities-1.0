@@ -1,0 +1,33 @@
+
+
+// RWStructuredBuffer<float4> bitonic_sort(RWStructuredBuffer<float4> data, int length) 
+// {
+//     // Bitonic sort works best with power-of-two sizes, so ensure that 'length' is a power of 2.
+//
+//     for (uint size = 2; size <= length; size *= 2)
+//     {
+//         for (uint stride = size / 2; stride > 0; stride /= 2)
+//         {
+//             for (uint id = 0; id < length; id++)
+//             {
+//                 uint ixj = id ^ stride;
+//
+//                 // Sort ascending or descending based on the bitonic sequence
+//                 bool ascending = (id & size) == 0;
+//                 bool compare = ascending ? (data[id].x > data[ixj].x) : (data[id].x < data[ixj].x);
+//
+//                 if (compare)
+//                 {
+//                     float4 temp = data[id];
+//                     data[id] = data[ixj];
+//                     data[ixj] = temp;
+//                 }
+//             }
+//
+//             // Synchronize threads
+//             GroupMemoryBarrierWithGroupSync();
+//         }
+//     }
+//
+//     return data;
+// }

@@ -1,4 +1,5 @@
 ﻿using Unity.Entities;
+using Unity.VisualScripting;
 using UnityEngine;
 
 namespace Terrain
@@ -10,7 +11,6 @@ namespace Terrain
     
     public class TTerrainManagerMono : MonoBehaviour
     {
-        
     }
     
     public class TTerrainManagerBaker : Baker<TTerrainManagerMono>

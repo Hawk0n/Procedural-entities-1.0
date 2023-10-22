@@ -1,0 +1,247 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+#pragma kernel CSAssignMeshData
+#include "Includes/NoiseFunctions.cginc"
+#include "Includes/MarchTables.compute"
+
+// Define the size of the shared memory buffer.
+#define SHARED_MEMORY_SIZE 256
+shared float3 sharedVertices[SHARED_MEMORY_SIZE];
+shared uint sharedIndices[SHARED_MEMORY_SIZE];
+shared uint numVertices, numIndices;
+
+struct noise_layer
+{
+    int is_active;
+    int noise_type;
+    int octaves;
+    float lacunarity;
+    float noise_scale;
+    float noise_multiplier;
+    float persistence;
+};
+
+// A vertex
+struct drawVertex{
+    float3 position_ws; // Position in world space
+    float2 uv;
+};
+
+// A triangle
+struct drawTriangle{
+    float3 normal_ws; // Normal in world space
+    drawVertex vertices[3];
+};
+
+AppendStructuredBuffer<drawTriangle> triangles_append;
+StructuredBuffer<noise_layer> noise_layers;
+RWStructuredBuffer<float4> point_densities;
+
+
+int noise_layer_count;
+int vertex_per_axis;
+float chunk_size;
+float4 chunk_position;
+float4 planet_pos;
+float hard_ground_level;
+float ground_level_weight;
+float isoLevel;
+
+
+
+RWStructuredBuffer<float3> vertex_buffer;
+RWStructuredBuffer<drawTriangle> triangles_rw;
+RWStructuredBuffer<uint> index_buffer;
+int triangle_count;
+
+float get_point_density(const float3 point_position)
+{
+    float density = hard_ground_level - length(point_position);
+
+    // Apply all noise layers
+    for (int i = 0; i < noise_layer_count; i++)
+    {
+        if (noise_layers[i].is_active != 1) continue;
+        switch (round(noise_layers[i].noise_type))
+        {
+        case 0:
+            density += SoftNoise(point_position, noise_layers[i].octaves,
+                                 noise_layers[i].noise_multiplier, noise_layers[i].noise_scale,
+                                 noise_layers[i].persistence, noise_layers[i].lacunarity);
+            break;
+        case 1:
+            density += RidgeNoise(point_position, noise_layers[i].octaves,
+                                  noise_layers[i].noise_multiplier, noise_layers[i].noise_scale,
+                                  noise_layers[i].persistence, noise_layers[i].lacunarity);
+            break;
+        default:
+            break;
+        }
+    }
+    return density;
+}
+
+drawVertex interpolate_vertices(float4 v1, float4 v2)
+{
+    drawVertex vert;
+    const float t = (isoLevel - v1.w) / (v2.w - v1.w);
+    vert.position_ws = v1.xyz + t * (v2.xyz - v1.xyz);
+    vert.uv = float2(1,1);
+    return vert;
+}
+
+bool evaluate_side(const uint id, const uint equals, float4 cube_corners[8], float4 ctc)
+{
+    return id == equals && abs(sign(cube_corners[ctc.x].w) + sign(cube_corners[ctc.y].w) + sign(cube_corners[ctc.z].w) + sign(cube_corners[ctc.w].w)) != 4;
+}
+
+int index_from_coord(uint3 id)
+{
+    return id.z * vertex_per_axis * vertex_per_axis + id.y * vertex_per_axis + id.x;
+}
+int index_from_coord(uint a, uint b, uint c){
+    return index_from_coord(uint3(a, b, c));
+}
+
+float3 coord_from_index(int a, int b, int c)
+{
+    return chunk_position.xyz + (int3(a,b,c) * chunk_size) / (chunk_position.w * (vertex_per_axis - 1));
+}
+
+// Helper function to calculate the hash value for a vertex position
+uint Hash(float3 position)
+{
+    // Perform a simple hash function by converting the position to an integer
+    return asuint(position.x + position.y * 31.0 + position.z * 67.0);
+}
+
+
+[numthreads(8,8,8)]
+void CSMain (uint3 id : SV_DispatchThreadID)
+{
+    if (any(id > vertex_per_axis)) return;
+
+    //CSGenerateDensityPoints
+
+    // Synchronize all threads within the thread group
+    // GroupMemoryBarrierWithGroupSync();
+
+
+    //-------------------------------------- Marching cubes section
+
+    // float3 point_position = chunk_position.xyz + (id * chunk_size) / (chunk_position.w * (vertex_per_axis - 1));
+    
+        // 8 corners of the current cube
+    float4 cubeCorners[8] = {
+        float4(coord_from_index(id.x + 0, id.y + 0, id.z + 0), 0),
+        float4(coord_from_index(id.x + 0, id.y + 1, id.z + 0), 0),
+        float4(coord_from_index(id.x + 1, id.y + 1, id.z + 0), 0),
+        float4(coord_from_index(id.x + 1, id.y + 0, id.z + 0), 0),
+        float4(coord_from_index(id.x + 0, id.y + 0, id.z + 1), 0),
+        float4(coord_from_index(id.x + 0, id.y + 1, id.z + 1), 0),
+        float4(coord_from_index(id.x + 1, id.y + 1, id.z + 1), 0),
+        float4(coord_from_index(id.x + 1, id.y + 0, id.z + 1), 0)
+    };
+    for (int ii = 0; ii < 8; ii++){
+        cubeCorners[ii].w = get_point_density(cubeCorners[ii].xyz);
+    }
+
+    // Find next chunks that needs to be created
+    // int side = 0;
+    // int n = vertex_per_axis - 2;
+    // if (evaluate_side(id.x, 0, cubeCorners, float4(4, 5, 6, 7))) side |= 1; // Back
+    // if (evaluate_side(id.y, 0, cubeCorners, float4(0, 1, 5, 4))) side |= 2; // Left
+    // if (evaluate_side(id.z, 0, cubeCorners, float4(0, 4, 7, 3))) side |= 4; // Bottom
+    // if (evaluate_side(id.x, n, cubeCorners, float4(0, 1, 2, 3))) side |= 8; // Front
+    // if (evaluate_side(id.y, n, cubeCorners, float4(3, 2, 6, 7))) side |= 16; // Right
+    // if (evaluate_side(id.z, n, cubeCorners, float4(1, 5, 2, 6))) side |= 32; // Top
+
+    int cubeIndex = 0;
+    if (cubeCorners[0].w < isoLevel) cubeIndex |= 1;
+    if (cubeCorners[2].w < isoLevel) cubeIndex |= 4;
+    if (cubeCorners[1].w < isoLevel) cubeIndex |= 2;
+    if (cubeCorners[3].w < isoLevel) cubeIndex |= 8;
+    if (cubeCorners[4].w < isoLevel) cubeIndex |= 16;
+    if (cubeCorners[5].w < isoLevel) cubeIndex |= 32;
+    if (cubeCorners[6].w < isoLevel) cubeIndex |= 64;
+    if (cubeCorners[7].w < isoLevel) cubeIndex |= 128;
+
+    // Create triangles for current cube configuration
+    for (int i = 0; triangulation[cubeIndex][i] != -1; i += 3)
+    {
+        // Get indices of corner points A and B for each of the three edges
+        // of the cube that need to be joined to form the triangle.
+        int a0 = cornerIndexAFromEdge[triangulation[cubeIndex][i + 0]];
+        int b0 = cornerIndexBFromEdge[triangulation[cubeIndex][i + 0]];
+        
+        int a1 = cornerIndexAFromEdge[triangulation[cubeIndex][i + 1]];
+        int b1 = cornerIndexBFromEdge[triangulation[cubeIndex][i + 1]];
+
+        int a2 = cornerIndexAFromEdge[triangulation[cubeIndex][i + 2]];
+        int b2 = cornerIndexBFromEdge[triangulation[cubeIndex][i + 2]];
+
+        // Only create vertexes of the lines from one point
+        // if((a0 != 0 && b0 != 0 || a1 != 0 && b1 != 0 || a2 != 0 && b2 != 0)) continue;
+        
+        drawTriangle tri;
+        tri.vertices[0] = interpolate_vertices(cubeCorners[a0], cubeCorners[b0]);
+        tri.vertices[1] = interpolate_vertices(cubeCorners[a1], cubeCorners[b1]);
+        tri.vertices[2] = interpolate_vertices(cubeCorners[a2], cubeCorners[b2]);
+        tri.normal_ws = float3(0,1,0);
+        
+        // tri.side = side;
+        if(all(tri.vertices[0].position_ws + tri.vertices[1].position_ws + tri.vertices[2].position_ws != 0))
+            triangles_append.Append(tri);
+    }
+}
+
+
+[numthreads(256, 1, 1)]
+void CSAssignMeshData (uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= triangle_count * 3) return;
+    
+    // Initialize the vertex and index buffers
+    if (id.x == 0)
+    {
+        numVertices = 0;
+    }
+
+    // Extract unique vertices from triangles
+    for (uint i = id.x; i < triangle_count; i += 256)
+    {
+        // Check if each vertex of the triangle is already in the vertex buffer
+        uint3 remappedIndices = uint3(0, 0, 0);
+        for (uint j = 0; j < 3; j++)
+        {
+            bool vertexExists = false;
+            uint vertexIndex = 0;
+            
+
+            for (uint k = 0; k < numVertices; k++)
+            {
+                if (all(vertex_buffer[k] == triangles_rw[i].vertices[j].position_ws))
+                {
+                    vertexExists = true;
+                    vertexIndex = k;
+                    break;
+                }
+            }
+
+            // If the vertex doesn't exist, add it to the vertex buffer
+            if (!vertexExists)
+            {
+                vertexIndex++;
+                vertex_buffer[vertexIndex] = triangles_rw[i].vertices[j].position_ws;
+                InterlockedAdd(numVertices, 1);
+            }
+
+            remappedIndices[j] = vertexIndex;
+        }
+
+        // Insert the remapped indices into the index buffer
+        index_buffer[i * 3] = remappedIndices.x;
+        index_buffer[i * 3 + 1] = remappedIndices.y;
+        index_buffer[i * 3 + 2] = remappedIndices.z;
+    }
+}

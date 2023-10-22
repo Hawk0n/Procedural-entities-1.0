@@ -2,8 +2,13 @@
 
 namespace Terrain
 {
-    public struct TTerrainUpdateRequest : IComponentData, IEnableableComponent
+    public struct TTerrainUpdateRequest : ISharedComponentData
     {
-        
+        public int Priority;
+
+        public TTerrainUpdateRequest(int priority)
+        {
+            Priority = priority;
+        }
     }
 }

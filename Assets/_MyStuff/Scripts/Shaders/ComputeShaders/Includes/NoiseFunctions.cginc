@@ -1,4 +1,4 @@
-#include "Assets/_MyStuff/Scripts/ComputeShaders/Includes/GradientNoise.compute"
+#include "Assets/_MyStuff/Scripts/Shaders/ComputeShaders/Includes/GradientNoise.compute"
 
 
 float SoftNoise(float3 pointPos, int octaves, float noiseMultiplier, float noiseScale, float persistence,
