@@ -130,9 +130,12 @@ namespace Terrain
             ComputeBuffer noiseLayerBuffer = new ComputeBuffer(math.max(1, noiseSettingsBuffer.Length), sizeof(float) * 4 + sizeof(int) * 3);
             noiseLayerBuffer.SetData(noiseSettingsBuffer.AsNativeArray()); 
             
-            int maxTriangleCountPerChunk = (resolution - 1) * (resolution - 1) * (resolution - 1) * 5;
-            ComputeBuffer trianglesBuffer = new ComputeBuffer(maxTriangleCountPerChunk, sizeof(float) * 18, ComputeBufferType.Append);
-            trianglesBuffer.SetCounterValue(0);
+            // int maxTriangleCountPerChunk = (resolution - 1) * (resolution - 1) * (resolution - 1) * 5;
+            // ComputeBuffer trianglesBuffer = new ComputeBuffer(maxTriangleCountPerChunk, sizeof(float) * 18, ComputeBufferType.Append);
+            // trianglesBuffer.SetCounterValue(0);
+            
+            ComputeBuffer nonEmptyCellsBuffer = new ComputeBuffer((resolution - 1) * (resolution - 1) * (resolution - 1), sizeof(float) * 4 * 8, ComputeBufferType.Append);
+            nonEmptyCellsBuffer.SetCounterValue(0);
             
             
             // Send data to GPU
@@ -148,7 +151,8 @@ namespace Terrain
             marchingCubesShaderV2.SetBuffer(0, "point_densities", pointsBuffer);
             // densityShader.SetBuffer(0, "empty", emptyCheckBuffer);
             marchingCubesShaderV2.SetBuffer(0, "noise_layers", noiseLayerBuffer);
-            marchingCubesShaderV2.SetBuffer(0, "triangles_append", trianglesBuffer);
+            // marchingCubesShaderV2.SetBuffer(0, "triangles_append", trianglesBuffer);
+            marchingCubesShaderV2.SetBuffer(0, "non_empty_cells", nonEmptyCellsBuffer);
             
 
             // Dispatch computeShader
@@ -158,54 +162,49 @@ namespace Terrain
             
             
             // Delay until shader has completed
-            AsyncGPUReadbackRequest request = AsyncGPUReadback.Request(pointsBuffer);
+            AsyncGPUReadbackRequest request = AsyncGPUReadback.Request(nonEmptyCellsBuffer);
             while (!request.done)
             {
-                await Task.Delay(1);
+                await Task.Delay(1); // BUG: Might be a bug where the request completes while the system is awaiting and the request gets deallocated.
             }
+            
+            // Get data
+            var cells = request.GetData<Cell>();
+            int count = cells.Length;
             
             
             // ------------------ Second shader to assign mesh data
             
             
-            // Get triangles count
-            ComputeBuffer countBuffer = new ComputeBuffer(1, sizeof(int), ComputeBufferType.Raw);
-            ComputeBuffer.CopyCount(trianglesBuffer, countBuffer, 0);
-            int[] counter1 = { 0 };
-            countBuffer.GetData(counter1);
-            int triangleCount = counter1[0];
-            countBuffer.Dispose();
-            
-            
             // Set data
-            mesh.SetVertexBufferParams(triangleCount * 3, new VertexAttributeDescriptor(VertexAttribute.Position, VertexAttributeFormat.Float32));
-            mesh.SetIndexBufferParams(triangleCount * 3, IndexFormat.UInt32);
+            mesh.SetVertexBufferParams(count * 3, new VertexAttributeDescriptor(VertexAttribute.Position, VertexAttributeFormat.Float32));
+            mesh.SetIndexBufferParams(count * 3, IndexFormat.UInt32);
             GraphicsBuffer vertexBuffer = mesh.GetVertexBuffer(0);
             GraphicsBuffer indexBuffer = mesh.GetIndexBuffer();
-            marchingCubesShaderV2.SetBuffer(1, "triangles_rw", trianglesBuffer);
+            marchingCubesShaderV2.SetBuffer(1, "non_empty_cells_r", nonEmptyCellsBuffer);
             marchingCubesShaderV2.SetBuffer(1, "vertex_buffer", vertexBuffer);
             marchingCubesShaderV2.SetBuffer(1, "index_buffer", indexBuffer);
-            marchingCubesShaderV2.SetInt("triangle_count", triangleCount);
+            marchingCubesShaderV2.SetInt("numCells", count);
             
             // Dispatch
-            marchingCubesShaderV2.Dispatch(1, triangleCount, 1, 1);
+            // marchingCubesShaderV2.Dispatch(1, triangleCount, 1, 1);
 
-            var vertexArray = new Vector3[triangleCount * 3];
-            var indexArray = new int[triangleCount * 3];
-            vertexBuffer.GetData(vertexArray);
-            indexBuffer.GetData(indexArray);
-            
+            // var vertexArray = new Vector3[triangleCount * 3];
+            // var indexArray = new int[triangleCount * 3];
+            // vertexBuffer.GetData(vertexArray);
+            // indexBuffer.GetData(indexArray);
+            //
             // mesh.SetVertices(vertexArray);
             // mesh.SetIndices(indexArray, MeshTopology.Triangles, 0);
+            // mesh.RecalculateBounds();
+            // mesh.RecalculateNormals();
+            // mesh.RecalculateTangents();
             
-            var triangleArray = new DrawTriangle[triangleCount];
-            trianglesBuffer.GetData(triangleArray);
-            
-            var points = request.GetData<float4>().AsReadOnly();
-            foreach (var vertex in vertexArray)
-            {
-                DrawPoint(vertex, 0.2f, Color.blue, 30);
-            }
+            // var points = request.GetData<float4>().AsReadOnly();
+            // foreach (var vertex in vertexArray)
+            // {
+            //     DrawPoint(vertex, 0.2f, Color.blue, 30);
+            // }
             // foreach (var point in points)
             // {
             //     DrawPoint(point, 0.1f, Color.Lerp(Color.green, Color.red, (point.w+40f)/80f), 30);
@@ -230,19 +229,15 @@ namespace Terrain
         }
     }
     
-    
-    
-    // A vertex
-    struct DrawVertex{
-        public float3 PositionWs; // Position in world space
-        public float2 UV;
-    };
-
-    // A triangle
-    struct DrawTriangle{
-        public float3 NormalWs; // Normal in world space
-        public DrawVertex Vertices1;
-        public DrawVertex Vertices2;
-        public DrawVertex Vertices3;
+    struct Cell
+    {
+        public float4 cellPoints0;
+        public float4 cellPoints1;
+        public float4 cellPoints2;
+        public float4 cellPoints3;
+        public float4 cellPoints4;
+        public float4 cellPoints5;
+        public float4 cellPoints6;
+        public float4 cellPoints7;
     };
 }
